@@ -5,7 +5,6 @@ clc
 warning off
 
 %% Parameters attribution
-
 nu = 3; %capital to output ratio
 alpha = 0.025; %productivity growth rate
 beta = 0.02; %population growth rate
@@ -41,7 +40,6 @@ fun_Phi_inv = @(x) 1 - (phi1./(x+phi0)).^(1/2);
 %% Sample paths in keen2
 
 % Additional parameters
-
 k_r = 0.08; % target capital adequacy ratio, 0 < k_r < 1
 eta_p = 4; % speed, eta_p > 0
 % pi_eq = fun_kappa_inv(kappa_eq);
@@ -53,8 +51,8 @@ epsilon = 0.005; %numerical precision parameter
 
 % Banking network parameters
 N = 3; % size of network
-a = [0.4, 0.35, 0.25]; % propotion of loans distributed to each bank. must sum to 1
-b = [0.5, 0.3, 0.2]; % proportion of deposits distributed to each bank. must sum to 1
+equity = ones(N,1); % all banks initially have positive equity
+prop = randfixedsum(sum(equity>0),1,1,0,1); % propotion of loans distributed to each bank. must sum to 1
 
 % Initial conditions
 omega01 = 0.9;
@@ -64,9 +62,8 @@ Y01 = 100;
 p01 = 1.0;
 d01 = (1 - k_r)*l01;
 T = 100;
-run = 1; % number of loops
+run = 3; % number of loops
 q = 0;
-
 omega0 = omega01;
 lambda0 = lambda01;
 l0 = l01;
@@ -81,7 +78,6 @@ output = zeros(3000*run, 11);
 rng(123)
 
 for i = 1:run
-    
     % Dynamical System
     [t,y] = ode15s(@(t,y) keen(t,y), [0 T], [convert([omega0, lambda0, l0]), p0, d0], options);
     y = [retrieve(y(:,1:3)),y(:,4),y(:,5)]; % convert back to original vars
@@ -97,35 +93,47 @@ for i = 1:run
     %output(ind,11) = k_r.*y(:,4).*output(ind,7).*(fun_kappa(1-y(:,1)-r.*y(:,3))-1+y(:,1)+r.*y(:,3)); % S_b
     %output(ind,12) = r.*output(ind,8) - r_d.*output(ind,6) - output(ind,11); % Dividends
   
-    % Distribute total Loand and Deposits among nodes
-    a = randfixedsum(3,1,1,0,1); % propotion of loans distributed to each bank. must sum to 1
-    b = a; % proportion of deposits distributed to each bank. must sum to 1
-    externalAssets = (output(ind(end),8)*a)';
-    externalLiabilities = (output(ind(end),10)*b)';
+    % Distribute total Loans and Deposits among nodes
+    check = equity>0;
+    a = (prop.*check)./sum(prop.*check);
+    b = [a(1); a(2); a(3)]; % proportion of deposits distributed to each bank. must sum to 1
+    a
+    externalAssets = (output(ind(end),8)*a);
+    externalLiabilities = (output(ind(end),10)*b);
     dif  = externalAssets - externalLiabilities;    
     if sum(dif) < N
         disp('error: bank with negative equity being attributed with assets')
     end
-    % Define the interbank Liabilities Matrix    
-    interbankLiabilitiesMatrix = abs([0 (0.9 + 0.2*rand)*dif(1) 0; ...
-                              0 0 (0.9 + 0.2*rand)*dif(2);... 
-                              (0.9 + 0.2*rand)*dif(3) 0 0]);     
     
+    % Define the interbank Liabilities Matrix    
+    interbankLiabilitiesMatrix = abs([0 (0.8 + 0.2*rand)*dif(1) 0; ...
+                              0 0 (0.8 + 0.2*rand)*dif(2);... 
+                              (0.8 + 0.2*rand)*dif(3) 0 0]);     
+    for i = 1:N
+        for j = 1:N
+            interbankLiabilitiesMatrix(i,j) = interbankLiabilitiesMatrix(i,j)*check(i)*check(j);
+        end
+    end
     % Initial shock to the system
-    uniformShock = 0.1;
+    uniformShock = 0.05; % should be less than the equity ratio k
     shock = uniformShock*externalAssets;
     externalAssetsShocked  =  externalAssets - shock;
     
     % Eisenberg & Noe clearing payment function
     [equityLoss equity equityZero paymentVector error] = eisenbergnoe(interbankLiabilitiesMatrix,externalAssetsShocked,externalLiabilities);
-
-%     % initial conditions for next run
-%     omega0 = output(ind(end),2);
-%     lambda0 = output(ind(end),3);
-%     l0 = f_loans.*output(ind(end),4);
-%     p0 = output(ind(end),5);
-%     d0 = f_deposits.*output(ind(end),6);
-%     Y0 = output(ind(end),7);
+    equityZero
+    equity
+    equityLoss
+    
+    % Initial conditions for next run
+    omega0 = output(ind(end),2);
+    lambda0 = output(ind(end),3);
+    %l0 = f_loans.*output(ind(end),4);
+    l0 = sum(externalAssetsShocked.*(equity>0))/(output(ind(end),5)*output(ind(end),7));
+    p0 = output(ind(end),5);
+    d0 = sum(externalLiabilities.*(equity>0))/(output(ind(end),5)*output(ind(end),7));
+    %d0 = f_deposits.*output(ind(end),6);
+    Y0 = output(ind(end),7);
     
     q = q + s;
     q
@@ -276,3 +284,40 @@ function f = keen(t,y)
 end
 
 end
+
+
+% Appendix A: Exogenous shocks
+
+%     f_loans = 1;
+%     f_deposits = 1;
+
+%     f_deposits = random(ran);
+%     if f_deposits > 1
+%         f_deposits = 1;
+%     else if f_deposits < 0
+%             f_deposits = 0;
+%         end
+%     end
+    
+%     f_loans = (1-(99/100)*output(ind(end),9))*f_deposits;
+
+
+%     f_loans = random(ran);
+%     if f_loans > 1
+%         f_loans = 1;
+%     else if f_loans < 0
+%             f_loans = 0;
+%         end
+%     end
+    
+%     % make sure loans never smaller than deposits
+%     if f_loans*output(ind(end),4) < f_deposits*output(ind(end),6)
+%         f_loans = 1;
+%         f_deposits = 1;
+%     end
+%     
+%     % stop shocks halfway through
+%     if ge(i,run/2)
+%         f_loans = 1;
+%         f_deposits = 1;
+%     end

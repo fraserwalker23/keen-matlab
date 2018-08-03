@@ -73,6 +73,7 @@ d0 = d01;
 
 % array to store all information from model
 output = zeros(3000*run, 11);
+bankequity = zeros(2*run, N);
 
 % set seed for reproducability
 rng(123)
@@ -97,7 +98,6 @@ for i = 1:run
     check = equity>0;
     a = (prop.*check)./sum(prop.*check);
     b = [a(1); a(2); a(3)]; % proportion of deposits distributed to each bank. must sum to 1
-    a
     externalAssets = (output(ind(end),8)*a);
     externalLiabilities = (output(ind(end),10)*b);
     dif  = externalAssets - externalLiabilities;    
@@ -109,32 +109,38 @@ for i = 1:run
     interbankLiabilitiesMatrix = abs([0 (0.8 + 0.2*rand)*dif(1) 0; ...
                               0 0 (0.8 + 0.2*rand)*dif(2);... 
                               (0.8 + 0.2*rand)*dif(3) 0 0]);     
-    for i = 1:N
+    for k = 1:N
         for j = 1:N
-            interbankLiabilitiesMatrix(i,j) = interbankLiabilitiesMatrix(i,j)*check(i)*check(j);
+            interbankLiabilitiesMatrix(k,j) = interbankLiabilitiesMatrix(k,j)*check(k)*check(j);
         end
     end
+    
     % Initial shock to the system
-    uniformShock = 0.05; % should be less than the equity ratio k
+    uniformShock = 0.00; % should be less than the equity ratio k
     shock = uniformShock*externalAssets;
     externalAssetsShocked  =  externalAssets - shock;
     
     % Eisenberg & Noe clearing payment function
-    [equityLoss equity equityZero paymentVector error] = eisenbergnoe(interbankLiabilitiesMatrix,externalAssetsShocked,externalLiabilities);
-    equityZero
-    equity
-    equityLoss
+    [equityLoss equity equityZero paymentVector error] = eisenbergnoe(interbankLiabilitiesMatrix,externalAssetsShocked,externalLiabilities); 
     
+    if i == 1
+           bankequity(2*i-1,:) = equityZero./sum(externalAssetsShocked).*(equity>0);
+           bankequity(2*i,:) = equity./sum(externalAssetsShocked.*(equity>0));
+    else if i > 1
+        bankequity(2*i-1,:) = (equity>0).*equityZero./sum(externalAssetsShocked)...
+        + (bankequity(2*i-2,:).*(equity<=0)')'; % pre settlement equity ratios
+        bankequity(2*i,:) = equity./sum(externalAssetsShocked.*(equity>0))...
+        + (bankequity(2*i-1,:).*(equity<=0)')'; % post settlement equity ratios
+        end
+    end
+           
     % Initial conditions for next run
     omega0 = output(ind(end),2);
     lambda0 = output(ind(end),3);
-    %l0 = f_loans.*output(ind(end),4);
     l0 = sum(externalAssetsShocked.*(equity>0))/(output(ind(end),5)*output(ind(end),7));
     p0 = output(ind(end),5);
     d0 = sum(externalLiabilities.*(equity>0))/(output(ind(end),5)*output(ind(end),7));
-    %d0 = f_deposits.*output(ind(end),6);
     Y0 = output(ind(end),7);
-    
     q = q + s;
     q
 end
@@ -185,6 +191,9 @@ figure(4)
 plot(output(1:q,1),eta_p*(m*output(1:q,2) - 1))
 xlabel('time t')
 ylabel('Inflation Rate')
+
+figure(5)
+plot([1:2*run], bankequity(:,1:3), '-o')
 
 % output(ind(end),2)
 % output(ind(end),3)
